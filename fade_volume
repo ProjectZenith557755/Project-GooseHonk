@@ -1,0 +1,26 @@
+#include "SoftwareSerial.h"
+#include "DFRobotDFPlayerMini.h"
+
+SoftwareSerial mySoftwareSerial(1, 3); // RX, TX
+DFRobotDFPlayerMini myDFPlayer;
+
+void setup() {
+  mySoftwareSerial.begin(9600);
+  myDFPlayer.begin(mySoftwareSerial);
+  myDFPlayer.volume(0);
+}
+
+void loop() {
+  for (byte j = 0;j <= 5;j++){
+    myDFPlayer.play(1);
+    for (byte i = 0;i <= 30;i++){
+      myDFPlayer.volume(i);
+      delay(290*j);
+    }
+    myDFPlayer.play(1);
+    for (byte i = 30;i >= 0;i--){
+      myDFPlayer.volume(i);
+      delay(190*j);
+    }
+  }
+}

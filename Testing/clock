@@ -1,0 +1,49 @@
+unsigned long pastMillis;
+int seconds, minutes, hours, days, years;
+
+void setup() {
+  Serial.begin(115200);
+}
+
+void loop() {
+  dhms();
+}
+
+void dhms(){
+  unsigned long temporaryMillis = millis();
+  
+  if (temporaryMillis%1000 == 0&&temporaryMillis != pastMillis){
+    pastMillis = temporaryMillis;
+    seconds++;
+    
+    if (seconds >= 60){
+      seconds = 0;
+      minutes++;
+  
+      if (minutes >= 60){
+        minutes = 0;
+        hours++;
+    
+        if (hours >= 24){
+          hours = 0;
+          days++;
+        }
+
+        if (days >= 365&&hours >= 6){
+          days = 0;
+          years++;
+        }
+      }
+    }
+
+    Serial.print(years);
+    Serial.print(":");
+    Serial.print(days);
+    Serial.print(":");
+    Serial.print(hours);
+    Serial.print(":");
+    Serial.print(minutes);
+    Serial.print(":");
+    Serial.println(seconds);
+  }
+}

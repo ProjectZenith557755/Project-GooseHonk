@@ -1,0 +1,73 @@
+#include <DS3232RTC.h>
+#include <ESP8266WiFi.h>
+#include "ESPAsyncWebServer.h"
+
+const char* ssid = "Hidden Network";
+const char* password = "Project GooseHonk";
+
+AsyncWebServer server(80);
+DS3232RTC myRTC;
+
+unsigned long int trig;
+byte t1, minTime = 10, maxTime = 20;
+
+void setup(){
+  WiFi.softAP(ssid, password);
+  
+  myRTC.begin();
+  setSyncProvider(myRTC.get);
+  
+  
+  server.on("/time", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", displayTime().c_str());
+  });
+  server.on("/client", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", String(preventWraparound(trig)).c_str());
+  });
+  server.on("/trigger", HTTP_GET, [](AsyncWebServerRequest * request){
+    request->send_P(200, "text/plain", trigger().c_str());
+  });
+
+  bool status;
+  server.begin();
+}
+
+void loop(){
+  if (t1 != hour()){
+    t1 = hour();
+    if (hour() >= minTime&&hour() <= maxTime){
+      if (random(4) == 3){
+        trig = millis()+60000;
+      }
+    }
+  }
+
+  if (timeStatus() != timeSet){
+    ESP.restart();
+  }
+}
+
+String trigger(){
+  if (preventWraparound(trig) == 4294967295){
+    trig = millis()+60000;
+    return String("Triggered");
+  }
+  else{
+    return String(preventWraparound(trig));
+  }
+}
+
+unsigned long preventWraparound(unsigned long in){
+  if (in >= millis()){
+    return in-millis();
+  }
+  return 4294967295;
+}
+
+String displayTime(){
+  String output;
+  
+  output+=year();output+=".";output+=month();output+=".";output+=day();output+=": ";output+=hour();output+=":";output+=minute();output+=":";output+=second();
+
+  return output;
+}

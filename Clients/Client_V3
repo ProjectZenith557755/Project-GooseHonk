@@ -1,0 +1,117 @@
+#include "SoftwareSerial.h" //Includes the software serial library (used for communicating with the dfplayer)
+#include "DFRobotDFPlayerMini.h" //Includes the dfplayer library
+#include <ESP8266HTTPClient.h> //For accessing websites and taking data from them
+#include <ESP8266WiFiMulti.h> //For connecting to wifi
+
+ESP8266WiFiMulti WiFiMulti; //Starts a wifi object
+SoftwareSerial mySoftwareSerial(1, 3); //Sets RX and TX for the dfplayer
+DFRobotDFPlayerMini myDFPlayer; //Makes a dfplayer object
+
+const char* ssid = "Hidden Network"; //The network to connect to 
+const char* password = "Project GooseHonk"; //The password for that network
+const char* client_s = "http://192.168.4.1/client/3"; //Which url the client should get data from
+
+unsigned long int beginAudio, fileLength, t1; //Begin audio is what client millisecond value it should trigger at, filelength is self explanitory, and t1 is used to trigger a function once per second
+unsigned int file, Mode, volume; //File is which audio file to play, mode determines if it'll be single/multi, rising, mid, or falling, and volume is... well, volume
+String data; //The received data
+bool trig; //Used to prevent multipse triggers in the same second
+
+void setup() {
+  WiFi.begin(ssid, password); //Connects to the wifi network with the previously defines ssid and password
+  mySoftwareSerial.begin(9600); //Starts the software serial connection at 9600 baud
+  myDFPlayer.begin(mySoftwareSerial); //Attaches the mydfplayer object to the newly started serial connection
+}
+
+
+void loop(){
+  if (millis()-t1 >= 1000){
+    t1 = millis(); //This and the previous line make the following code get called once per second
+    if (WiFiMulti.run() != WL_CONNECTED||Mode == 4){ //If it isn't connected to wifi or is being to to restart by the server, 
+      ESP.restart(); //restart
+    }
+    data = httpGETRequest(client_s); //Sets the data string to the text on the url it was given at runtime
+    parseData(data); //Parses the data string into variables
+    trig = true; //Allows the trigger event to happen
+  }
+  
+  if (beginAudio-millis() == 0&&trig){ //If the distance between the millisecond value and millisecond value it should trigger at is 0 and the trigger event is enabled, 
+    trig = false; //Disable the trigger event
+    trigger(); //Trigger
+  }
+}
+
+String httpGETRequest(const char* serverName) {
+  WiFiClient client;
+  HTTPClient http;
+    
+  http.begin(client, serverName); //Starts being a client for the server at the specified url
+  
+  int httpResponseCode = http.GET(); //Gets the response code (can be used to tell if there was an error)
+  
+  String payload = "--"; //Makes the payload variable and sets it to "--" (the function returning "--" tells you it received no data)
+  
+  if (httpResponseCode > 0){ //If there wasn't an error
+    payload = http.getString(); //Sets payload to the string of text on the website specified by the url
+  }
+
+  http.end(); //Stops being a client (It saves resources)
+
+  return payload; //Return the data it received
+}
+
+void parseData(String string){
+  int index1 = string.indexOf(','); //Finds the first comma and sets index1 to its position in the string
+  int index2 = string.indexOf(',', index1+1); //Finds the second comma and sets index2 to its position in the string
+  int index3 = string.indexOf(',', index2+1); //etc
+  int index4 = string.indexOf(',', index3+1); //etc
+
+  file = string.substring(0,index1).toInt(); //Gets the section of the string between 0 and the first comma and then converts it to an integer
+  fileLength = string.substring(index1+1,index2).toInt(); //Gets the section of the string between the first and second comma and then converts it to an integer
+  volume = string.substring(index2+1,index3).toInt(); //etc
+  Mode = string.substring(index3+1,index4).toInt(); //etc
+  beginAudio = string.substring(index4+1,string.length()).toInt()+millis(); //Adds millis() onto the received value in order to determine when to trigger
+}
+
+void trigger(){
+  switch (Mode){ //Switches the mode between (0: single/multi, 1: rising edge, 2: mid, 3: falling edge)
+    case 0:
+      myDFPlayer.volume(volume); //Sets the volume to the received volume value
+      myDFPlayer.play(file); //Plays the specified file 
+    break;
+    case 1:
+      myDFPlayer.volume(volume);
+      myDFPlayer.play(file);
+      
+      for (byte i = 1;i <= volume;i++){ //Repeats once per volume
+        myDFPlayer.volumeDown(); //Decreases the volume
+        delay((pow(i,2)*(fileLength/9455))/2); //'interesting' function that allows for the volume to be turned up/down to an exponential curve
+      }
+      myDFPlayer.stop(); //Stops playing the file at the halfway mark (there are three nodes, the first and third should only play the first and second halves, respectively
+    break;
+    case 2:
+      myDFPlayer.volume(0);
+      myDFPlayer.play(file);
+      
+      for (byte i = volume;i >= 1;i--){
+        myDFPlayer.volumeUp(); //Increases the volume exponentially
+        delay((pow(i,2)*(fileLength/9455))/2);
+      }
+      for (byte i = 1;i <= volume;i++){
+        myDFPlayer.volumeDown(); //Decreases the volume exponentially
+        delay((pow(i,2)*(fileLength/9455))/2);
+      }
+    break;
+    case 3:
+      myDFPlayer.volume(0);
+      myDFPlayer.play(file);
+      delay(fileLength/2); //Waits for the first half of the file to finish playing before starting
+      
+      for (byte i = volume;i >= 1;i--){
+        myDFPlayer.volumeUp();
+        delay((pow(i,2)*(fileLength/9455))/2);
+      }
+    break;
+  }
+}
+
+

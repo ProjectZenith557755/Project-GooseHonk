@@ -1,0 +1,52 @@
+#include <ESP8266HTTPClient.h>
+#include <ESP8266WiFiMulti.h>
+
+ESP8266WiFiMulti WiFiMulti;
+
+const char* ssid = "ESP8266-Access-Point";
+const char* password = "123456789";
+
+const char* ServerTUT = "http://192.168.4.1/timeuntilltrigger";
+
+unsigned long timeUntillTrigger, triggerPacketMillis;
+
+void setup() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  WiFi.begin(ssid, password);
+}
+
+void loop() {
+  if ((WiFiMulti.run() == WL_CONNECTED)) {
+    timeUntillTrigger = httpGETRequest(ServerTUT).toInt();
+    triggerPacketMillis = millis();
+  }
+  else {
+    WiFi.begin(ssid, password);
+  }
+
+  if (int(timeUntillTrigger-(millis()-triggerPacketMillis)) <= 0&&int(timeUntillTrigger-(millis()-triggerPacketMillis)) >= -1000){
+    digitalWrite(LED_BUILTIN, LOW);
+  }
+  else {
+    digitalWrite(LED_BUILTIN, HIGH);
+  }
+}
+
+String httpGETRequest(const char* serverName) {
+  WiFiClient client;
+  HTTPClient http;
+    
+  http.begin(client, serverName);
+  
+  int httpResponseCode = http.GET();
+  
+  String payload = "--"; 
+  
+  if (httpResponseCode>0) {
+    payload = http.getString();
+  }
+
+  http.end();
+
+  return payload;
+}

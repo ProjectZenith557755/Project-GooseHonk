@@ -1,0 +1,45 @@
+#include <ESP8266WiFi.h>
+#include "ESPAsyncWebServer.h"
+
+const char* ssid = "ESP8266-Access-Point";
+const char* password = "123456789";
+
+unsigned long pastMillis;
+int timeUntillTrigger;
+
+AsyncWebServer server(80);
+
+String trigger(){
+  pastMillis = millis();
+  timeUntillTrigger = 1000;
+  return String("Started");
+}
+
+String TUT(){
+  return String(int(timeUntillTrigger-(millis()-pastMillis)));
+}
+
+void setup(){
+  pinMode(LED_BUILTIN, OUTPUT);
+  
+  WiFi.softAP(ssid, password);
+  
+  server.on("/trigger", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", trigger().c_str());
+  });
+  server.on("/timeuntilltrigger", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", TUT().c_str());
+  });
+  
+  bool status;
+  server.begin();
+}
+ 
+void loop(){
+  if (int(timeUntillTrigger-(millis()-pastMillis)) <= 0&&int(timeUntillTrigger-(millis()-pastMillis)) >= -1000){
+    digitalWrite(LED_BUILTIN, LOW);
+  }
+  else {
+    digitalWrite(LED_BUILTIN, HIGH);
+  }
+}

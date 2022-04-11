@@ -1,0 +1,145 @@
+#include <DS3232RTC.h> //The rtc library
+#include <EEPROM.h> //Used to store the enable/disable byte
+#include <ESP8266WiFi.h> //Used to make a wifi network
+#include "ESPAsyncWebServer.h" //Used to host a series of websites on the aformentioned network
+
+const char* ssid = "Hidden Network"; //It seems to reduce the range of visibility, ease of connecting, and stability of the network. Perfect! :D
+const char* password = "Project GooseHonk"; //The password
+
+AsyncWebServer server(80); //Which port to host the websites on
+DS3232RTC myRTC; //Makes the myRTC object
+
+long t1, t2, fileLength, clientTrigger[3]; //t1 and t2 are used for periodic triggers of functions, fileLength is used for the move functionality, and clientTrigger tells the clients when to trigger
+byte file, Mode[3], volume; //File is which file the clients will play, mode is their mode (0: single/multi, 1: rising edge, 2: mid pulse, 3: falling edge, 4: remote restart), volume is volume
+const byte triggerLimits[2] = {9,18}, movePossibilities[6][3] = {{1,2,3},{2,3,1},{3,2,1},{1,3,2},{2,1,3},{3,1,2}}; //Lazy? yes, but in this scenario, it's simpler. (possibilities = nodes!, so anything more than nodes=5 is usreasonable)
+const long lengths[6] = {7000, 3000, 3000, 1000, 1000, 5000}; //The lengths of each file on the clients' sd cards
+
+void setup(){
+  WiFi.softAP(ssid, password); //Starts the wifi network with defined ssid and password
+  
+  myRTC.begin(); //Begins the myRTC object
+  setSyncProvider(myRTC.get); //No idea, my guess is that it sets which object you're getting th etime from
+
+  EEPROM.begin(512); //Initialises 0.5kb of EEPROM for storing the enable/disable byte. I couldn't get it down to 1 byte, and don't care either, as it hasn't caused problems in testing
+  
+  
+  server.on("/time", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", displayTime().c_str()); //Starts the /time website, which displayes the rtcs' perceived time
+  });
+  server.on("/trigger", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", trigger().c_str()); //Starts the /trigger website, which allows forced triggers
+  });
+  server.on("/enable", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", enable().c_str()); //Used to permanently enable (writes to EEPROM)
+  });
+  server.on("/disable", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", disable().c_str()); //Used to permanently disable (writes to EEPROM)
+  });
+  
+  server.on("/client/1", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", clientInf(1).c_str()); //info for client 1
+  });
+  server.on("/client/2", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", clientInf(2).c_str()); //info for client 2
+  });
+  server.on("/client/3", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", clientInf(3).c_str()); //info for client 3
+  });
+
+  bool status; //No idea
+  server.begin(); //Starts the websites
+}
+
+void loop(){
+  if (millis()-t1 >= 1000){ 
+    t1 = millis(); //This and the previous line of code cause the following lines to get called once per second
+    if (timeStatus() != timeSet||(hour() == 0&&minute() == 1)){ //If the rtc is disconnected or it's 0001, 
+      ESP.restart(); //Restart
+    }
+  }
+
+  if (t2 != hour()){
+    t2 = hour(); //This and the previous line of code call the following code once per hour (governed by rtc)
+    if (hour() >= triggerLimits[0]&&hour() <= triggerLimits[1]){ //If it's not too early or late
+      if (random(6) == 5){ //20% chance
+        trigger(); //Trigger a honking event
+      }
+    }
+    if (hour() == 0&&minute() == 0){//If it's midnight, 
+      memset(Mode, 4, sizeof(Mode)); //Tell client to reset (imporves long term stability)
+      delay(15000); //Wait 15 seconds
+      memset(Mode, 0, sizeof(Mode)); //Tell them to re-enter normal operation mode
+    } //A note on memset, it allows you to set every byte in an array to a given value, really helpful :)
+  }
+}
+
+String clientInf(byte clientNumber){ //Which client it's grabbing info for
+  String output; //Makes the output string
+
+  output += String(file+1) + ','; //Adds the file to play (the dfplayer uses 1-indexed songs, my array uses 0-indexing
+  output += String(fileLength) + ','; //How long is the file? (used for the moving functionality)
+  output += String(volume) + ','; //Volume to play at
+  output += String(Mode[clientNumber-1]) + ','; //Gives to mode for any given client
+  output += String(clientTrigger[clientNumber-1]-(long)millis()); //Gives the trigger time to any given client
+  
+  return output; //Returns the output string
+}
+
+String displayTime(){
+  String output; //Makes the output string
+  
+  output+=year();output+=".";output+=month();output+=".";output+=day();output+=": ";output+=hour();output+=":";output+=minute();output+=":";output+=second(); //Just makes a string like yyyy.mm.dd: hh.mm.ss
+
+  return output; //Return the output
+}
+
+String enable(){
+  EEPROM.write(0, 1); //Writes the enable byte to EEPROM address 0
+  EEPROM.commit(); //Saves value to EEPROM
+
+  return "Permanently enabled, visit '/disable' to disable"; //Tells you that it's enabled and how to disabe it
+}
+
+String disable(){
+  EEPROM.write(0, 0); //Writes the disable byte EEPROM adress 0
+  EEPROM.commit(); //Saves value to EEPROM
+
+  return "Permanently disabled, visit '/enable' to enable"; //Tells you that it's disabled and how to enable it
+}
+
+String trigger(){
+  if (EEPROM.read(0) == 1){ //If it's enabled
+    memset(Mode, 0, sizeof(Mode)); //Clears the modes
+    memset(clientTrigger, 0, sizeof(clientTrigger)); //Clears the trigger times
+    volume = 30; //Sets the volume
+    file = random(6); //Selects a random file
+    fileLength = lengths[file]; //Sets the file length to that of the previously chosen file
+    
+    if (random(4) != 3){ //2/3 chance of the single/multi mode
+      long temporary = millis()+60000; //Sets the trigger time to 60 seconds from this point
+      for (byte i = 0;i <= 2;i++){
+        clientTrigger[random(3)] = temporary;
+      } //Randomly sets some client to trigger
+    }
+    else {
+    byte temporary = random(5); //Which moving mode will it be?
+    
+      for (byte i = 0;i <= 2;i++){
+        Mode[i] = movePossibilities[temporary][i];
+        clientTrigger[i] = millis()+60000;
+      } //Sets the mode (rising, mid, falling) of each client and tells them to trigger in 60 seconds
+    }
+    
+    String output; //Makes the output string
+    for (byte i = 0;i <= 2;i++){ //Dumps to mode array into it
+      output+=Mode[i];
+      output+=",";
+    }
+    output+=" - ";
+    output+=file; //Adds the file number
+    output+=",";
+    output+=fileLength; //Adds the file length
+    return output; //Return the output string
+  }
+  return "Disabled, visit '/enable' to re-enable"; //Gets called if it's disabled
+}

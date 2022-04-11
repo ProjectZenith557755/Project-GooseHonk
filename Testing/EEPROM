@@ -1,0 +1,19 @@
+#include <EEPROM.h>
+
+void setup(){
+  Serial.begin(115200);
+  EEPROM.begin(512);
+}
+
+void loop(){
+  if (Serial.available()){
+    byte temp = Serial.parseInt();
+    if (temp != 0){
+      EEPROM.write(0, temp);
+      EEPROM.commit();
+    }
+  }
+
+  Serial.println(EEPROM.read(0));
+  delay(250);
+}
